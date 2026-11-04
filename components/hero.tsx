@@ -16,7 +16,7 @@ export function Hero() {
         <div className="lg:col-span-6">
           <p className="mb-6 flex items-center gap-3 text-xs uppercase tracking-[0.25em] text-wood">
             <span className="h-px w-10 bg-wood" aria-hidden="true" />
-            Мастерская в Истре
+            Мастерская на Истре
           </p>
           <h1 className="font-serif text-5xl font-light leading-[1.02] text-balance md:text-7xl xl:text-[5.5rem]">
             Дерево, которое
