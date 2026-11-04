@@ -22,39 +22,14 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.ISTRAART_DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.ISTRAART_DEPLOY_KNOWN_HOSTS }}
         run: |
+          set -euo pipefail
           test -n "$DEPLOY_SSH_KEY" && test -n "$DEPLOY_KNOWN_HOSTS"
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
-          # Accept both full known_hosts lines and "ssh-ed25519 AAAA..." values.
-          # The key itself comes only from the pinned secret, never from the network.
-          host_key=$(printf '%s\n' "$DEPLOY_KNOWN_HOSTS" | awk '{
-            for (i = 1; i < NF; i++)
-              if ($i == "ssh-ed25519") { print $(i+1); exit }
-          }')
-          if ! printf '%s' "$host_key" | grep -Eq '^[A-Za-z0-9+/]+={0,2}
-          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
-
-      - name: Update site, build and restart
-        run: |
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -i ~/.ssh/id_ed25519 deploy@46.23.98.232 'bash -se' <<'REMOTE'
-          set -euo pipefail
-          cd /opt/istraart
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "Deployment aborted: working tree is not clean"
-            exit 1
-          fi
-          git fetch origin main
-          git merge --ff-only origin/main
-          pnpm install --frozen-lockfile
-          pnpm build
-          sudo -n /usr/bin/systemctl restart istraart.service
-          sleep 3
-          curl -fsS -o /dev/null http://127.0.0.1:3000/
-          echo "IstraArt deployed successfully"
-          REMOTE
-; then
-            echo "Invalid known_hosts secret: expected an ssh-ed25519 public key"
+          host_key=$(printf '%s\n' "$DEPLOY_KNOWN_HOSTS" | awk '$1 == "ssh-ed25519" {print $2; exit} $2 == "ssh-ed25519" {print $3; exit}')
+          if [ -z "$host_key" ]; then
+            echo 'Host key secret must contain an ssh-ed25519 public key'
             exit 1
           fi
           printf '46.23.98.232 ssh-ed25519 %s\n' "$host_key" > ~/.ssh/known_hosts
@@ -66,7 +41,7 @@ jobs:
           set -euo pipefail
           cd /opt/istraart
           if [ -n "$(git status --porcelain)" ]; then
-            echo "Deployment aborted: working tree is not clean"
+            echo 'Deployment aborted: working tree is not clean'
             exit 1
           fi
           git fetch origin main
@@ -76,5 +51,5 @@ jobs:
           sudo -n /usr/bin/systemctl restart istraart.service
           sleep 3
           curl -fsS -o /dev/null http://127.0.0.1:3000/
-          echo "IstraArt deployed successfully"
+          echo 'IstraArt deployed successfully'
           REMOTE
