@@ -20,6 +20,7 @@ export const metadata: Metadata = {
   description:
     'Светильники, подсвечники, подставки и арт-объекты из коряг, спилов и натурального дерева. Мастерская в Истре. Изделия по индивидуальному заказу.',
   generator: 'v0.app',
+  icons: { icon: '/icon.svg', shortcut: '/icon.svg' },
 }
 
 export const viewport: Viewport = {
