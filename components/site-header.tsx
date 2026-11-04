@@ -5,17 +5,17 @@ import Link from 'next/link'
 import { useState } from 'react'
 
 const links = [
-  { href: '#catalog', label: 'Каталог' },
-  { href: '#about', label: 'О мастерской' },
-  { href: '#custom', label: 'На заказ' },
-  { href: '#gallery', label: 'Галерея' },
-  { href: '#contacts', label: 'Контакты' },
+  { href: '/#catalog', label: 'Каталог' },
+  { href: '/#about', label: 'О мастерской' },
+  { href: '/#custom', label: 'На заказ' },
+  { href: '/#gallery', label: 'Галерея' },
+  { href: '/#contacts', label: 'Контакты' },
 ]
 
 export function Logo({ light = false }: { light?: boolean }) {
   return (
     <Link
-      href="#top"
+      href="/#top"
       className="flex items-center gap-2.5"
       aria-label="IstraArt — на главную"
     >
@@ -61,7 +61,7 @@ export function SiteHeader() {
           </ul>
         </nav>
         <Link
-          href="#custom"
+          href="/#custom"
           className="hidden rounded-full border border-graphite px-5 py-2.5 text-sm transition-colors hover:bg-graphite hover:text-milk md:inline-block"
         >
           Заказать изделие
@@ -97,7 +97,7 @@ export function SiteHeader() {
             ))}
           </ul>
           <Link
-            href="#custom"
+            href="/#custom"
             onClick={() => setOpen(false)}
             className="mt-6 block rounded-full bg-graphite py-3.5 text-center text-sm text-milk"
           >

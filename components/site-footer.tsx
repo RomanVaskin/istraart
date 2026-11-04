@@ -13,10 +13,10 @@ export function SiteFooter() {
         </div>
         <nav aria-label="Ссылки в подвале">
           <ul className="flex flex-wrap gap-x-8 gap-y-3 text-sm text-milk/70">
-            <li><Link href="#catalog" className="hover:text-milk">Каталог</Link></li>
-            <li><Link href="#about" className="hover:text-milk">О мастерской</Link></li>
-            <li><Link href="#custom" className="hover:text-milk">На заказ</Link></li>
-            <li><Link href="#contacts" className="hover:text-milk">Контакты</Link></li>
+            <li><Link href="/#catalog" className="hover:text-milk">Каталог</Link></li>
+            <li><Link href="/#about" className="hover:text-milk">О мастерской</Link></li>
+            <li><Link href="/#custom" className="hover:text-milk">На заказ</Link></li>
+            <li><Link href="/#contacts" className="hover:text-milk">Контакты</Link></li>
           </ul>
         </nav>
       </div>
