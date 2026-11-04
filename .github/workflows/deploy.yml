@@ -17,6 +17,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate catalog secrets
+        env:
+          OLNOO_CATALOG_TOKEN: ${{ secrets.OLNOO_CATALOG_TOKEN }}
+          OLNOO_CATALOG_BASIC_AUTH: ${{ secrets.OLNOO_CATALOG_BASIC_AUTH }}
+        run: |
+          set -euo pipefail
+          node scripts/catalog-deploy-env.mjs > /dev/null
+
       - name: Set up SSH credentials
         env:
           DEPLOY_SSH_KEY: ${{ secrets.ISTRAART_DEPLOY_SSH_KEY }}
@@ -34,6 +49,30 @@ jobs:
           fi
           printf '46.23.98.232 ssh-ed25519 %s\n' "$host_key" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Deliver catalog environment
+        env:
+          OLNOO_CATALOG_TOKEN: ${{ secrets.OLNOO_CATALOG_TOKEN }}
+          OLNOO_CATALOG_BASIC_AUTH: ${{ secrets.OLNOO_CATALOG_BASIC_AUTH }}
+        run: |
+          set -euo pipefail
+          umask 077
+          payload=$(mktemp)
+          trap 'rm -f "$payload"' EXIT
+          node scripts/catalog-deploy-env.mjs > "$payload"
+          remote_script=$(cat <<'REMOTE_CATALOG'
+          set -eu
+          umask 077
+          tmp=$(mktemp .env.catalog.json.XXXXXX)
+          trap 'rm -f "$tmp"' EXIT HUP INT TERM
+          cat > "$tmp"
+          node -e 'try { const x = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); if (!x || Object.keys(x).sort().join(",") !== "OLNOO_CATALOG_BASIC_AUTH,OLNOO_CATALOG_TOKEN,OLNOO_CATALOG_URL" || x.OLNOO_CATALOG_URL !== "https://admin.olnoo.com" || typeof x.OLNOO_CATALOG_TOKEN !== "string" || typeof x.OLNOO_CATALOG_BASIC_AUTH !== "string") process.exit(1); } catch { process.exit(1); }' "$tmp"
+          mv -f -- "$tmp" .env.catalog.json
+          trap - EXIT HUP INT TERM
+          echo 'Catalog environment delivered'
+          REMOTE_CATALOG
+          )
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -i ~/.ssh/id_ed25519 deploy@46.23.98.232 "cd /opt/istraart && $remote_script" < "$payload"
 
       - name: Update site, build and restart
         run: |
