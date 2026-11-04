@@ -92,3 +92,35 @@
 Ранее зафиксирован старый README в commit `cf3abd1`. Если GitHub позволит восстановить удалённый репозиторий через настройки аккаунта, старые документы и историю стоит сверить с этой версией.
 
 **Восстановлено из решений:** история/позиционирование, направления продукции, DIY по 500 ₽, фото вместо 3D, магазин-MVP, каналы продвижения, интеграция с OLNOO, серверы и домен. Неизвестные реальные характеристики изделий, наличие, коммерческие цены, реквизиты и доступы не выдуманы.
+
+## Автодеплой сайта (GitHub → сервер РФ)
+
+Workflow: `.github/workflows/deploy.yml`. После **merge/push в `main`** (или ручного запуска `workflow_dispatch`) через SSH обновляет **только** `/opt/istraart` на `46.23.98.232`, выполняет `pnpm install --frozen-lockfile`, `pnpm build`, перезапускает `istraart.service` и проверяет локальный HTTP-ответ. При ошибке сборки служба не перезапускается. Если рабочая копия содержит незакоммиченные изменения, deploy прекращается без их удаления. Сервер KZ и OLNOO Admin не затрагиваются.
+
+### Первоначальная настройка (однократно)
+
+На сервере РФ от `root`:
+
+```bash
+id deploy >/dev/null 2>&1 || adduser --disabled-password --gecos '' deploy
+chown -R deploy:deploy /opt/istraart
+install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+printf 'deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart istraart.service\n' > /etc/sudoers.d/istraart-deploy
+chmod 440 /etc/sudoers.d/istraart-deploy
+visudo -cf /etc/sudoers.d/istraart-deploy
+```
+
+На Mac создайте **отдельный** ключ без passphrase исключительно для GitHub Actions:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/istraart_deploy -N ''
+cat ~/.ssh/istraart_deploy.pub | ssh root@46.23.98.232 'cat >> /home/deploy/.ssh/authorized_keys && chown deploy:deploy /home/deploy/.ssh/authorized_keys && chmod 600 /home/deploy/.ssh/authorized_keys'
+ssh -i ~/.ssh/istraart_deploy deploy@46.23.98.232 'whoami'
+```
+
+В `GitHub → RomanVaskin/istraart → Settings → Secrets and variables → Actions` добавить **Repository secrets**:
+
+- `ISTRAART_DEPLOY_SSH_KEY` — **полное содержимое** `~/.ssh/istraart_deploy` (закрытый ключ; никогда не коммитить).
+- `ISTRAART_DEPLOY_KNOWN_HOSTS` — строка ключа сервера из `ssh-keygen -F 46.23.98.232 -f ~/.ssh/known_hosts` на Mac, с которым уже выполнялось подтверждённое SSH-подключение; не заменять слепым `ssh-keyscan` в workflow.
+
+Затем объединить PR с workflow и проверить успешный запуск в `Actions`. При смене IP обновить адрес в workflow и значение host key в секрете. Доступ деплой-пользователя ограничен только владельцем папки сайта и правом перезапуска `istraart.service`.
