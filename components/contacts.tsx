@@ -1,10 +1,8 @@
-import { MapPin, MessageCircle, Phone, Send } from 'lucide-react'
+import { MapPin, Send } from 'lucide-react'
 
 const contacts = [
-  { icon: Phone, label: 'Телефон', value: '+7 (900) 000-00-00', href: 'tel:+79000000000' },
-  { icon: Send, label: 'Telegram', value: '@istraart', href: 'https://t.me/istraart' },
-  { icon: MessageCircle, label: 'WhatsApp', value: '+7 (900) 000-00-00', href: 'https://wa.me/79000000000' },
-  { icon: MapPin, label: 'Мастерская', value: 'г. Истра, Московская область', href: undefined },
+  { icon: Send, label: 'Telegram', value: '@istraarte', href: 'https://t.me/istraarte' },
+  { icon: MapPin, label: 'Мастерская', value: 'Истринское водохранилище', href: undefined },
 ]
 
 export function Contacts() {
