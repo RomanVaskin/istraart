@@ -154,3 +154,19 @@ test('sitemap includes only current exported slugs and robots excludes the photo
   const robots = load('../app/robots.ts', {})
   assert.equal(robots.default().rules.disallow, '/api/')
 })
+
+test('product descriptions appear once when equal after trim and both when different', () => {
+  const { CatalogProduct } = load('../components/catalog-product.tsx', components())
+  for (const [description, offerDescription, expected] of [
+    ['Единое описание', 'Единое описание', ['Единое описание']],
+    ['  Единое описание\n', '\nЕдиное описание  ', ['  Единое описание\n']],
+    ['Общее описание', 'Описание изделия', ['Общее описание', 'Описание изделия']],
+    ['Два слова', 'Два  слова', ['Два слова', 'Два  слова']],
+    ['', 'Описание изделия', ['Описание изделия']],
+  ] as const) {
+    const card = { ...product, description, offers: { finished: { ...product.offers.finished, description: offerDescription } } }
+    const html = renderToStaticMarkup(createElement(CatalogProduct, { card }))
+    const descriptions = [...html.matchAll(/<p class="mt-6 whitespace-pre-wrap leading-relaxed text-taupe">([\s\S]*?)<\/p>/g)].map((match) => match[1])
+    assert.deepEqual(descriptions, [...expected])
+  }
+})

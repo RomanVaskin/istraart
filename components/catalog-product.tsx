@@ -27,7 +27,7 @@ export function CatalogProduct({ card }: { card: CatalogCard }) {
           {card.description && <p className="mt-6 whitespace-pre-wrap leading-relaxed text-taupe">{card.description}</p>}
           {offer.title !== card.title && <h2 className="mt-6 font-serif text-2xl">{offer.title}</h2>}
           <p className="mt-5 font-serif text-3xl text-wood-deep">{formatPrice(offer.priceRub)}</p>
-          <p className="mt-6 whitespace-pre-wrap leading-relaxed text-taupe">{offer.description}</p>
+          {card.description.trim() !== offer.description.trim() && <p className="mt-6 whitespace-pre-wrap leading-relaxed text-taupe">{offer.description}</p>}
           <dl className="mt-8 divide-y divide-sand-deep border-y border-sand-deep text-sm">
             {card.lengthCm != null && <div className="flex justify-between gap-6 py-4"><dt className="text-taupe">Длина</dt><dd>{card.lengthCm} см</dd></div>}
             {card.diameterCm != null && <div className="flex justify-between gap-6 py-4"><dt className="text-taupe">Диаметр</dt><dd>{card.diameterCm} см</dd></div>}
