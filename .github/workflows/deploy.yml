@@ -62,11 +62,23 @@ jobs:
           node scripts/catalog-deploy-env.mjs > "$payload"
           remote_script=$(cat <<'REMOTE_CATALOG'
           set -eu
+          command -v setfacl >/dev/null 2>&1 && command -v getfacl >/dev/null 2>&1 || {
+            echo 'Catalog delivery requires setfacl/getfacl; previous environment was kept' >&2
+            exit 1
+          }
+          id -u www-data >/dev/null
           umask 077
           tmp=$(mktemp .env.catalog.json.XXXXXX)
           trap 'rm -f "$tmp"' EXIT HUP INT TERM
           cat > "$tmp"
           node -e 'try { const x = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); if (!x || Object.keys(x).sort().join(",") !== "OLNOO_CATALOG_BASIC_AUTH,OLNOO_CATALOG_TOKEN,OLNOO_CATALOG_URL" || x.OLNOO_CATALOG_URL !== "https://admin.olnoo.com" || typeof x.OLNOO_CATALOG_TOKEN !== "string" || typeof x.OLNOO_CATALOG_BASIC_AUTH !== "string") process.exit(1); } catch { process.exit(1); }' "$tmp"
+          # Replace inherited ACLs: only deploy (owner) may write; only www-data may read.
+          setfacl --set='u::rw-,u:www-data:r--,g::---,m::r--,o::---' "$tmp"
+          expected_acl=$(printf 'user::rw-\nuser:www-data:r--\ngroup::---\nmask::r--\nother::---\n')
+          if [ "$(getfacl --omit-header --absolute-names "$tmp")" != "$expected_acl" ]; then
+            echo 'Catalog runtime access verification failed; previous environment was kept' >&2
+            exit 1
+          fi
           mv -f -- "$tmp" .env.catalog.json
           trap - EXIT HUP INT TERM
           echo 'Catalog environment delivered'
