@@ -70,16 +70,16 @@ test('catalog and product pages render separate URLs, confirmed prices and publi
     const html = renderToStaticMarkup(createElement(CatalogProduct, { card }))
     assert.match(html, /<h1/)
     for (const related of card.relatedCards ?? []) assert.ok(html.includes(`href="${data.cardHref(related)}"`))
-    assert.ok(html.includes('href="/#contacts"'))
+    assert.ok(html.includes('href="https://t.me/istraarte?text='))
     assert.ok(html.includes(`/api/catalog/photos/${card.id}/0`))
     assert.equal(html.includes('admin.olnoo.com'), false)
     assert.equal(html.includes('.pdf'), false)
   }
-  assert.ok(renderToStaticMarkup(createElement(CatalogProduct, { card: cards[2] })).includes('Запросить покупку гайда'))
+  assert.ok(renderToStaticMarkup(createElement(CatalogProduct, { card: cards[2] })).includes('Обсудить заказ'))
   const unavailable = { ...cards[1], offers: { finished: { ...cards[1].offers.finished!, available: false } } }
   const html = renderToStaticMarkup(createElement(CatalogProduct, { card: unavailable }))
   assert.ok(html.includes('Сейчас недоступно'))
-  assert.equal(html.includes('Заказать через мастерскую'), false)
+  assert.equal(html.includes('Обсудить заказ'), false)
 })
 
 test('slug page does not serve unexported products; upstream errors are not disguised as missing products', async () => {
@@ -169,4 +169,62 @@ test('product descriptions appear once when equal after trim and both when diffe
     const descriptions = [...html.matchAll(/<p class="mt-6 whitespace-pre-wrap leading-relaxed text-taupe">([\s\S]*?)<\/p>/g)].map((match) => match[1])
     assert.deepEqual(descriptions, [...expected])
   }
+})
+
+test('product gallery switches whole photos, opens/closes native zoom and drafts an order using the existing Telegram contact', () => {
+  const card = { ...product, title: 'Светильник «Берег» & дерево', offers: { finished: { ...product.offers.finished, imageIndexes: [0, 2] }, guide: guide.offers.guide } }
+  const original = structuredClone(card)
+  const states: any[] = ['finished', 0]
+  let cursor = 0, open = false, opened = 0, closed = 0
+  const ref = { current: { showModal() { open = true; opened++ }, close() { open = false; closed++ } } }
+  const { CatalogProduct } = load('../components/catalog-product.tsx', { ...components(), react: {
+    useRef: () => ref,
+    useState(initial: unknown) { const slot = cursor++; return [states[slot] ?? initial, (value: unknown) => { states[slot] = value }] },
+  } })
+  const render = () => { cursor = 0; return CatalogProduct({ card }) }
+  const walk = (tree: any): any[] => !tree || typeof tree !== 'object' ? [] : Array.isArray(tree) ? tree.flatMap(walk) : [tree, ...walk(tree.props?.children)]
+  const find = (tree: any, predicate: (node: any) => boolean) => walk(tree).find(predicate)
+  const main = (tree: any) => find(tree, (n) => n.type === 'button' && n.props['aria-label']?.startsWith('Увеличить фото:'))
+  let tree = render()
+  assert.equal(main(tree).props.children.props.src, data.photoUrl(card, 0))
+  find(tree, (n) => n.props?.['aria-label'] === 'Фото 2').props.onClick()
+  tree = render()
+  assert.equal(main(tree).props.children.props.src, data.photoUrl(card, 2))
+  assert.equal(main(tree).props.children.props.className, 'object-contain')
+  assert.equal(find(tree, (n) => n.props?.['aria-label'] === 'Фото 2').props['aria-current'], true)
+  main(tree).props.onClick()
+  assert.equal(open, true); assert.equal(opened, 1)
+  const dialog = find(tree, (n) => n.type === 'dialog')
+  assert.equal(dialog.props.open, undefined, 'native showModal owns modality, focus and Escape behavior')
+  const dialogPhoto = walk(dialog).find((n) => n.props?.src)
+  assert.equal(dialogPhoto.props.src, data.photoUrl(card, 2))
+  assert.equal(dialogPhoto.props.className, 'object-contain')
+  dialog.props.onClick({ target: {}, currentTarget: ref.current })
+  assert.equal(open, true, 'clicking the image does not close zoom')
+  dialog.props.onClick({ target: ref.current, currentTarget: ref.current })
+  assert.equal(open, false)
+  main(tree).props.onClick()
+  find(tree, (n) => n.type === 'button' && n.props.children === 'Закрыть').props.onClick()
+  assert.equal(open, false); assert.equal(closed, 2)
+  const order = new URL(find(tree, (n) => n.type === 'a' && n.props.href.startsWith('https://t.me/')).props.href)
+  assert.equal(order.origin + order.pathname, 'https://t.me/istraarte')
+  assert.ok(order.searchParams.get('text')?.includes(card.title))
+  assert.ok(order.searchParams.get('text')?.includes('https://istraart.ru/catalog/lamp'))
+  find(tree, (n) => n.type === 'button' && n.props.children === data.offerLabels.guide).props.onClick()
+  tree = render()
+  assert.equal(states[1], 0, 'switching offers resets selected thumbnail')
+  assert.ok(new URL(find(tree, (n) => n.type === 'a' && n.props.href.startsWith('https://t.me/')).props.href).searchParams.get('text')?.includes('покупку гайда'))
+  assert.deepEqual(card, original, 'gallery and order preparation never mutate catalog data')
+})
+
+test('product characteristics show only confirmed dimensions and do not infer AI photo provenance', () => {
+  const { CatalogProduct } = load('../components/catalog-product.tsx', components())
+  const html = renderToStaticMarkup(createElement(CatalogProduct, { card: { ...product, diameterCm: 12 } }))
+  assert.ok(html.includes('<details'))
+  assert.ok(html.includes('Размеры и характеристики'))
+  assert.ok(html.includes('30 см')); assert.ok(html.includes('12 см'))
+  assert.equal(html.includes('Визуализация будущего изделия'), false, 'current public DTO contains no trusted photo kind')
+  const noDimensions = renderToStaticMarkup(createElement(CatalogProduct, { card: { ...product, lengthCm: null, diameterCm: null } }))
+  assert.equal(noDimensions.includes('<dt class="text-taupe">Длина</dt>'), false)
+  assert.equal(noDimensions.includes('<dt class="text-taupe">Диаметр</dt>'), false)
 })
