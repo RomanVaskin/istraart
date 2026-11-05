@@ -4,6 +4,8 @@ import { Readable } from 'node:stream'
 import { parseCatalogCards } from './catalog-data.ts'
 export class CatalogUnavailable extends Error {}
 
+const catalogAgent = new https.Agent({ keepAlive: true, maxSockets: 8, maxFreeSockets: 2 })
+
 // Catalog-only equivalent of curl --resolve; never changes global DNS/HTTPS agents.
 const catalogFetch: typeof fetch = async (input, init) => {
   const url = new URL(String(input))
@@ -11,7 +13,7 @@ const catalogFetch: typeof fetch = async (input, init) => {
   return new Promise<Response>((resolve, reject) => {
     const req = https.request(url, {
       method: 'GET',
-      agent: false,
+      agent: catalogAgent,
       servername: 'admin.olnoo.com',
       rejectUnauthorized: true,
       lookup: (_hostname, options, callback) => callback(null, options.all
@@ -41,7 +43,7 @@ export async function catalogRequest(path: string, fetchImpl: typeof fetch = cat
   if (base.protocol !== 'https:' || base.username || base.password || !token || token.length < 32 || !basic || !basic.includes(':')) throw new CatalogUnavailable('Catalog connection is not configured')
   try {
     const res = await fetchImpl(new URL(`/api/catalog/export${path}`, base), { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(10000), headers: { Authorization: `Basic ${Buffer.from(basic).toString('base64')}`, 'X-Olnoo-Catalog-Token': token } })
-    if (!res.ok || res.headers.get('x-olnoo-catalog-project') !== 'istraart') throw new Error('upstream failure')
+    if (!res.ok || res.headers.get('x-olnoo-catalog-project') !== 'istraart') { await res.body?.cancel().catch(() => {}); throw new Error('upstream failure') }
     return res
   } catch { throw new CatalogUnavailable('Catalog is temporarily unavailable') }
 }

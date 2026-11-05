@@ -6,12 +6,13 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
 import * as data from './catalog-data.ts'
+import { createCatalogPhotoCache } from './catalog-photo-cache.ts'
 import { catalogRequest, catalogBytes } from './olnoo-catalog.ts'
 
 const raw = { id: '00000000-0000-4000-8000-000000000001', slug: 'material', title: 'Материал', description: 'Подтверждено владельцем', lengthCm: 30, diameterCm: null, updatedAt: '2026-11-04', offers: { raw: { title: 'Материал', description: 'Описание материала', priceRub: 1500, available: true, imageIndexes: [0] } } }
 const product = { ...raw, id: '00000000-0000-4000-8000-000000000002', slug: 'lamp', title: 'Светильник', offers: { finished: { ...raw.offers.raw, title: 'Светильник', priceRub: 2500 } } }
 const guide = { ...raw, id: '00000000-0000-4000-8000-000000000003', slug: 'lamp-guide', title: 'Гайд', offers: { guide: { ...raw.offers.raw, title: 'Гайд', priceRub: 500 } } }
-const ref = (card: typeof raw | typeof product | typeof guide, type: data.OfferKind) => ({ id: card.id, slug: card.slug, title: card.title, type })
+const ref = (card: typeof raw | typeof product | typeof guide, type: data.OfferKind | 'guide') => ({ id: card.id, slug: card.slug, title: card.title, type })
 const snapshot = () => data.parseCatalogCards({ project: 'istraart', cards: [
   { ...raw, relatedCards: [ref(product, 'finished')] },
   { ...product, relatedCards: [ref(raw, 'raw'), ref(guide, 'guide')] },
@@ -40,8 +41,9 @@ const components = () => ({
 test('RU catalog contract resolves only published snapshot members and keeps legacy data', () => {
   const cards = snapshot()
   assert.deepEqual(cards[0].relatedCards, [ref(product, 'finished')])
-  assert.deepEqual(cards[1].relatedCards, [ref(raw, 'raw'), ref(guide, 'guide')])
-  assert.deepEqual(cards[2].relatedCards, [ref(raw, 'raw'), ref(product, 'finished')])
+  assert.deepEqual(cards[1].relatedCards, [ref(raw, 'raw')])
+  assert.equal(cards.length, 2)
+  assert.equal(data.findCatalogCard(cards, 'lamp-guide'), null)
   assert.equal(data.cardHref(cards[1]), '/catalog/lamp')
   assert.equal(data.findCatalogCard(cards, 'lamp')?.id, product.id)
   for (const slug of ['private-draft', '../lamp', 'https://other.example', 'a'.repeat(101)]) assert.equal(data.findCatalogCard(cards, slug), null)
@@ -56,7 +58,7 @@ test('RU catalog contract resolves only published snapshot members and keeps leg
   for (const offer of [{ ...raw.offers.raw, priceRub: 0 }, { ...raw.offers.raw, priceRub: 10_000_001 }, { ...raw.offers.raw, imageIndexes: [] }]) assert.throws(() => data.parseCatalogCards({ project: 'istraart', cards: [{ ...raw, offers: { raw: offer } }] }))
   assert.throws(() => data.parseCatalogCards({ project: 'istraart', cards: [raw, { ...product, slug: raw.slug }] }))
   const legacy = data.parseCatalogCards({ project: 'istraart', cards: [{ ...raw, offers: { raw: raw.offers.raw, guide: guide.offers.guide } }] })[0]
-  assert.deepEqual(Object.keys(legacy.offers), ['raw', 'guide'])
+  assert.deepEqual(Object.keys(legacy.offers), ['raw'])
 })
 
 test('catalog and product pages render separate URLs, confirmed prices and published related links', () => {
@@ -71,11 +73,13 @@ test('catalog and product pages render separate URLs, confirmed prices and publi
     assert.match(html, /<h1/)
     for (const related of card.relatedCards ?? []) assert.ok(html.includes(`href="${data.cardHref(related)}"`))
     assert.ok(html.includes('href="https://t.me/istraarte?text='))
+    assert.equal(html.includes('Гайд'), false)
     assert.ok(html.includes(`/api/catalog/photos/${card.id}/0`))
     assert.equal(html.includes('admin.olnoo.com'), false)
     assert.equal(html.includes('.pdf'), false)
   }
-  assert.ok(renderToStaticMarkup(createElement(CatalogProduct, { card: cards[2] })).includes('Обсудить заказ'))
+  assert.equal(grid.includes('Гайд'), false)
+  assert.equal(grid.includes('lamp-guide'), false)
   const unavailable = { ...cards[1], offers: { finished: { ...cards[1].offers.finished!, available: false } } }
   const html = renderToStaticMarkup(createElement(CatalogProduct, { card: unavailable }))
   assert.ok(html.includes('Сейчас недоступно'))
@@ -115,8 +119,8 @@ test('photo route preserves protected requests and rejects unpublished, foreign,
   try {
     let calls = 0
     const route = load('../app/api/catalog/photos/[id]/[index]/route.ts', {
-      '@/lib/catalog-data': data,
-      '@/lib/olnoo-catalog': { catalogBytes, catalogRequest: (path: string) => catalogRequest(path, async (_url, init) => {
+      '@/lib/catalog-data': data, '@/lib/catalog-photo-cache': { createCatalogPhotoCache },
+      '@/lib/olnoo-catalog': { loadCatalog: async () => [{ ...snapshot()[1], offers: { finished: { ...product.offers.finished, imageIndexes: [0,2,3] } } }], catalogBytes, catalogRequest: (path: string) => catalogRequest(path, async (_url, init) => {
         calls++
         const headers = new Headers(init?.headers)
         assert.equal(headers.get('x-olnoo-catalog-token'), 'test-site-token-'.repeat(3))
@@ -172,7 +176,7 @@ test('product descriptions appear once when equal after trim and both when diffe
 })
 
 test('product gallery switches whole photos, opens/closes native zoom and drafts an order using the existing Telegram contact', () => {
-  const card = { ...product, title: 'Светильник «Берег» & дерево', offers: { finished: { ...product.offers.finished, imageIndexes: [0, 2] }, guide: guide.offers.guide } }
+  const card = { ...product, title: 'Светильник «Берег» & дерево', offers: { finished: { ...product.offers.finished, imageIndexes: [0, 2] }, raw: raw.offers.raw } }
   const original = structuredClone(card)
   const states: any[] = ['finished', 0]
   let cursor = 0, open = false, opened = 0, closed = 0
@@ -210,10 +214,10 @@ test('product gallery switches whole photos, opens/closes native zoom and drafts
   assert.equal(order.origin + order.pathname, 'https://t.me/istraarte')
   assert.ok(order.searchParams.get('text')?.includes(card.title))
   assert.ok(order.searchParams.get('text')?.includes('https://istraart.ru/catalog/lamp'))
-  find(tree, (n) => n.type === 'button' && n.props.children === data.offerLabels.guide).props.onClick()
+  find(tree, (n) => n.type === 'button' && n.props.children === data.offerLabels.raw).props.onClick()
   tree = render()
   assert.equal(states[1], 0, 'switching offers resets selected thumbnail')
-  assert.ok(new URL(find(tree, (n) => n.type === 'a' && n.props.href.startsWith('https://t.me/')).props.href).searchParams.get('text')?.includes('покупку гайда'))
+  assert.ok(new URL(find(tree, (n) => n.type === 'a' && n.props.href.startsWith('https://t.me/')).props.href).searchParams.get('text')?.includes('заказ'))
   assert.deepEqual(card, original, 'gallery and order preparation never mutate catalog data')
 })
 
@@ -227,4 +231,69 @@ test('product characteristics show only confirmed dimensions and do not infer AI
   const noDimensions = renderToStaticMarkup(createElement(CatalogProduct, { card: { ...product, lengthCm: null, diameterCm: null } }))
   assert.equal(noDimensions.includes('<dt class="text-taupe">Длина</dt>'), false)
   assert.equal(noDimensions.includes('<dt class="text-taupe">Диаметр</dt>'), false)
+})
+
+test('versioned photo cache avoids repeat byte transfers but checks current publication/version before 304 or cached responses', async () => {
+  let cards = snapshot(), available = true, metadataReads = 0, downloads = 0
+  const api = load('../app/api/catalog/photos/[id]/[index]/route.ts', {
+    '@/lib/catalog-data': data, '@/lib/catalog-photo-cache': { createCatalogPhotoCache },
+    '@/lib/olnoo-catalog': { catalogBytes, loadCatalog: async () => { metadataReads++; if (!available) throw new Error('upstream unavailable'); return cards }, catalogRequest: async () => { downloads++; return new Response(new Uint8Array([downloads,2,3]), { headers: { 'Content-Type': 'image/png' } }) } },
+  })
+  const request = (version = cards[1]?.updatedAt ?? 'old', etag?: string, id = product.id, index = '0') => api.GET(new Request(`https://istraart.test/api/catalog/photos/${id}/${index}?v=${encodeURIComponent(version)}`, { headers: etag ? { 'If-None-Match': etag } : {} }), { params: Promise.resolve({ id, index }) })
+  const first = await request()
+  assert.equal(first.status, 200)
+  assert.equal(first.headers.get('cache-control'), 'private, no-cache, max-age=0, must-revalidate')
+  const etag = first.headers.get('etag')!
+  assert.deepEqual(new Uint8Array(await first.arrayBuffer()), new Uint8Array([1,2,3]))
+  const repeat = await request(cards[1].updatedAt, etag)
+  assert.equal(repeat.status, 304); assert.equal(await repeat.text(), '')
+  assert.equal(downloads, 1); assert.equal(metadataReads, 2, 'authorization cannot be cached with bytes')
+  assert.equal((await request()).status, 200); assert.equal(downloads, 1)
+  const oldVersion = cards[1].updatedAt
+  cards = [cards[0], { ...cards[1], updatedAt: '2026-11-05T12:00:00Z' }]
+  const changed = await request(cards[1].updatedAt, etag)
+  assert.equal(changed.status, 200); assert.notEqual(changed.headers.get('etag'), etag)
+  assert.deepEqual(new Uint8Array(await changed.arrayBuffer()), new Uint8Array([2,2,3]))
+  assert.equal(downloads, 2)
+  assert.equal((await request(oldVersion, etag)).status, 404, 'old URL cannot fetch a new version under the old key')
+  assert.equal((await request(cards[1].updatedAt, etag, product.id, '9')).status, 404)
+  const currentVersion = cards[1].updatedAt
+  cards = [cards[0]]
+  const removed = await request(currentVersion, etag)
+  assert.equal(removed.status, 404); assert.equal(removed.headers.get('cache-control'), 'no-store')
+  cards = snapshot(); available = false
+  assert.equal((await request(oldVersion, etag)).status, 404, 'no stale fallback on auth/upstream failure')
+  assert.equal(downloads, 2)
+})
+
+test('photo byte cache coalesces loads, bounds memory and expires; failed loads are not cached', async () => {
+  let now = 0, loads = 0
+  const cached = createCatalogPhotoCache(6, 100, () => now)
+  const photo = async () => { loads++; return { bytes: new Uint8Array([1,2,3]), mime: 'image/jpeg' } }
+  await Promise.all([cached('a', photo), cached('a', photo)])
+  assert.equal(loads, 1)
+  await cached('b', photo); await cached('a', photo); await cached('c', photo)
+  assert.equal(loads, 3)
+  await cached('b', photo); assert.equal(loads, 4, 'least recently used entry is evicted')
+  now = 101
+  await cached('b', photo); assert.equal(loads, 5)
+  let failures = 0
+  for (let i = 0; i < 2; i++) await assert.rejects(() => cached('bad', async () => { failures++; throw new Error('unavailable') }))
+  assert.equal(failures, 2)
+})
+
+test('guide-only/mixed legacy data is accepted without public guides, variants, links or sitemap entries', async () => {
+  const incoming = { project: 'istraart', cards: [raw, product, guide, { ...raw, id: '00000000-0000-4000-8000-000000000004', slug: 'legacy', offers: { ...raw.offers, guide: null }, relatedCards: [ref(guide, 'guide')] }] }
+  const copy = structuredClone(incoming)
+  const cards = data.parseCatalogCards(incoming)
+  assert.equal(cards.length, 3)
+  assert.ok(cards.every((c) => Object.keys(c.offers).every((kind) => kind === 'raw' || kind === 'finished')))
+  assert.ok(cards.every((c) => !c.relatedCards?.some((r) => r.id === guide.id)))
+  assert.equal(data.findCatalogCard(cards, guide.slug), null)
+  assert.deepEqual(incoming, copy, 'upstream data is never mutated')
+  const { Catalog } = load('../components/catalog.tsx', components())
+  const html = renderToStaticMarkup(createElement(Catalog, { cards }))
+  assert.equal(html.includes('Гайд'), false); assert.ok(html.includes('Исходный материал'))
+  const sitemap = load('../app/sitemap.ts', { '@/lib/catalog-data': data, '@/lib/olnoo-catalog': { loadCatalog: async () => cards } })
+  assert.equal((await sitemap.default()).some((r: any) => r.url.endsWith('/lamp-guide')), false)
 })

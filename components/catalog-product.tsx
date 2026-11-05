@@ -14,7 +14,7 @@ export function CatalogProduct({ card }: { card: CatalogCard }) {
   const gallery = offer.imageIndexes.map((index) => photoUrl(card, index))
   const selectedPhoto = gallery[thumb] || gallery[0]
   const zoom = useRef<HTMLDialogElement>(null)
-  const orderMessage = `Здравствуйте! Хочу обсудить ${kind === 'guide' ? 'покупку гайда' : 'заказ'} «${card.title}». https://istraart.ru${cardHref(card)}`
+  const orderMessage = `Здравствуйте! Хочу обсудить заказ «${card.title}». https://istraart.ru${cardHref(card)}`
   const orderHref = `https://t.me/istraarte?text=${encodeURIComponent(orderMessage)}`
   return <section className="bg-cream py-12 md:py-20">
     <div className="mx-auto max-w-7xl px-5 md:px-8">

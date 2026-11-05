@@ -10,14 +10,14 @@ import assert from 'node:assert/strict'
 import { parseCatalogCards, photoUrl } from './catalog-data.ts'
 import { catalogRequest, loadCatalog, catalogBytes } from './olnoo-catalog.ts'
 const card = { id: 'e62bad4e-0514-442c-a4df-3d2cf83f8844', slug: 'wood-1', title: 'Находка', description: 'Описание', lengthCm: 30, diameterCm: null, updatedAt: '2026-11-04', offers: { raw: { title: 'Материал', description: 'Заготовка', priceRub: 1500, available: true, imageIndexes: [0] }, guide: { title: 'Гайд', description: 'По запросу после покупки', priceRub: 500, available: false, imageIndexes: [2] } } }
-test('one find retains independent offers, prices, availability and photo references without a PDF', () => {
+test('legacy guide offers are hidden while physical offers keep prices and photo references', () => {
   const parsed = parseCatalogCards({ project: 'istraart', cards: [{ ...card, secret: 'hidden', content_item_id: 'hidden', pdf: 'hidden.pdf' }, card] })
   assert.equal(parsed.length, 1)
-  assert.equal(parsed[0].offers.guide?.priceRub, 500)
-  assert.equal(parsed[0].offers.guide?.available, false)
+  assert.deepEqual(Object.keys(parsed[0].offers), ['raw'])
+  assert.equal(JSON.stringify(parsed).includes('Гайд'), false)
   assert.equal(parsed[0].offers.finished, undefined)
   assert.equal(JSON.stringify(parsed).includes('hidden'), false)
-  assert.ok(photoUrl(parsed[0], 2).startsWith(`/api/catalog/photos/${card.id}/2?`))
+  assert.ok(photoUrl(parsed[0], 0).startsWith(`/api/catalog/photos/${card.id}/0?`))
 })
 test('empty catalog stays empty and malformed/unfilled offers are not turned into demo products', () => {
   assert.deepEqual(parseCatalogCards({ project: 'istraart', cards: [] }), [])
@@ -73,7 +73,7 @@ test('fixed catalog address preserves real TLS/SNI/Host, credentials, project ch
   })
   for (const scenario of ['success', 'untrusted', 'wrong-host'] as const) await t.test(scenario, async (sub) => {
     const tls = scenario === 'wrong-host' ? wrongHost : valid
-    let received = 0, status = 200, project = 'istraart', tlsError = ''
+    let received = 0, handshakes = 0, status = 200, project = 'istraart', tlsError = ''
     const server = https.createServer(tls, (req, res) => {
       received++
       assert.equal(req.headers.host, 'admin.olnoo.com')
@@ -83,6 +83,7 @@ test('fixed catalog address preserves real TLS/SNI/Host, credentials, project ch
       res.writeHead(status, { ...(status === 302 ? { Location: 'https://other.example/private' } : {}), 'X-Olnoo-Catalog-Project': project, 'Content-Type': req.url!.includes('/photos/') ? 'image/jpeg' : 'application/json' })
       res.end(req.url!.includes('/photos/') ? Buffer.from([0xff, 0xd8, 0xff, 0xd9]) : JSON.stringify({ project: 'istraart', cards: [card] }))
     })
+    server.on('secureConnection', () => { handshakes++ })
     server.on('tlsClientError', () => {}) // Expected for rejected certificates.
     server.listen(0, '127.0.0.1')
     await once(server, 'listening')
@@ -93,7 +94,8 @@ test('fixed catalog address preserves real TLS/SNI/Host, credentials, project ch
       assert.equal(url.origin, 'https://admin.olnoo.com')
       assert.equal(options.servername, 'admin.olnoo.com')
       assert.equal(options.rejectUnauthorized, true)
-      assert.equal(options.agent, false)
+      assert.ok(options.agent instanceof https.Agent)
+      assert.equal(options.agent.options.keepAlive, true)
       // Verify BOTH resolver signatures used by Node, then route the test socket locally.
       options.lookup!('admin.olnoo.com', { all: false }, (err, address, family) => {
         assert.equal(err, null); assert.equal(address, '213.155.29.140'); assert.equal(family, 4)
@@ -109,6 +111,7 @@ test('fixed catalog address preserves real TLS/SNI/Host, credentials, project ch
       assert.equal((await loadCatalog())[0].id, card.id)
       const photo = await catalogRequest(`/${card.id}/photos/0`)
       assert.deepEqual(await catalogBytes(photo, 100), new Uint8Array([0xff, 0xd8, 0xff, 0xd9]))
+      assert.equal(handshakes, 1, 'catalog metadata and photo reuse the same authenticated TLS connection')
       status = 302
       await assert.rejects(() => catalogRequest(''), /temporarily unavailable/)
       status = 200; project = 'other'

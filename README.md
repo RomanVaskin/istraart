@@ -142,3 +142,50 @@ ssh -i ~/.ssh/istraart_deploy deploy@46.23.98.232 'whoami'
 проверенными ценами. Материал, изделие и DIY-гайд связываются через необязательное
 `relatedCards` из OLNOO PR #109. Старые объединённые предложения совместимы.
 Интеграция и порядок выпуска описаны в [docs/OLNOO_CATALOG.md](docs/OLNOO_CATALOG.md).
+
+## Published product photos and hidden legacy guides
+
+The public catalog now contains only `raw` (Исходный материал) and `finished`
+(Готовое изделие). Incoming guide-only cards are omitted; legacy mixed cards keep
+physical offers, ignoring guide offers and guide relations. Unknown physical
+formats still fail validation. Guide URLs are absent from product lookup/sitemap
+and return not-found. No OLNOO records or relations are deleted or changed.
+
+Photo path: browser → `/api/catalog/photos/<id>/<index>?v=<updatedAt>` → protected
+OLNOO export. Previously every request downloaded the full upstream file with
+`no-store`; the native HTTPS transport also opened a fresh connection each time.
+The catalog transport now reuses a bounded HTTPS agent, preserving pinned KZ
+address, TLS certificate/SNI/Host, Basic Auth, project token and redirect refusal.
+No agent or DNS behavior is changed for other origins.
+
+For versioned photos, an in-process LRU caches up to 32 entries / 32 MiB for five
+minutes, with concurrent loads coalesced. No new disk/media store/service is used.
+Before any hit or 304 the route fetches the uncached project-bound published
+catalog and verifies card, offered index and exact current updatedAt. Changed
+versions get a different key/ETag; old versions, removed cards and unavailable or
+unauthorized upstream fail closed with uncached 404. No stale fallback. Invalid
+MIME, failed downloads and oversized files are not cached. Unversioned legacy URLs
+retain `no-store` and current authorization checks.
+
+Browser responses use `private, no-cache, max-age=0, must-revalidate` and an ETag.
+Repeated requests can receive 304 without transferring image bytes. Long public
+max-age/immutable is deliberately avoided, so removal from publication is checked
+on every new request. Already downloaded copies cannot be recalled. Card photo
+updates must continue changing updatedAt, as in the existing OLNOO contract.
+Original file dimensions/quality and OLNOO storage remain unchanged.
+
+**Image Optimization configuration:** the existing Next Image components are
+retained. `next.config.mjs` already has global `images.unoptimized: true`; this
+patch leaves it unchanged, including all other sections. It does not claim to
+activate Next's optimizer. Enabling it is a separate decision: its optimized
+image cache must also enforce current publication/version checks, rather than
+serving a previously published image after the guarded route is bypassed by a
+cache hit.
+
+Checks cover repeat hits/304, updated/stale versions, unpublish/upstream failure,
+invalid/foreign media, LRU limits/expiry/coalescing, TLS connection reuse and
+certificate rejection, guide-only/mixed parsing and public rendering. Live site
+latencies could not be measured from the execution environment: the outbound
+request was rejected before a site response. Local tests confirm removed repeat
+upstream byte transfers, not a production latency number. TypeScript, profile
+tests, build and diff check are required; no merge/deploy is performed here.
